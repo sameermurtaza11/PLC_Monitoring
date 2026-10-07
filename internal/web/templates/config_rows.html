@@ -1,0 +1,68 @@
+{{define "plc_rows.html"}}
+{{range .}}
+<tr>
+  <td class="strong">{{.Name}}</td>
+  <td>{{.IP}} : {{.Port}}</td>
+  <td class="num">{{.UnitID}}</td>
+  <td class="num">{{.ScanIntervalMS}}</td>
+  <td class="num">{{.TimeoutMS}}</td>
+  <td>{{if .Enabled}}<span class="badge ok">Yes</span>{{else}}<span class="badge none">No</span>{{end}}</td>
+  <td class="num">{{.PVCount}}</td>
+  <td class="muted">{{.Description}}</td>
+  <td class="actions">
+    <button type="button" hx-get="/config/plcs/{{.ID}}/edit" hx-target="#form-body">Edit</button>
+    <button type="button" class="danger" hx-delete="/config/plcs/{{.ID}}" hx-target="#config-msg"
+            hx-confirm="Delete PLC {{.Name}}?">Delete</button>
+  </td>
+</tr>
+{{else}}
+<tr><td colspan="9" class="muted">No PLCs yet.</td></tr>
+{{end}}
+{{end}}
+
+{{define "pv_config_rows.html"}}
+{{range .}}
+<tr>
+  <td>{{.PLCName}}</td>
+  <td>{{.RegisterAddress}} <span class="tag">{{kind .RegisterAddress}}</span></td>
+  <td class="strong">{{.Name}}</td>
+  <td>{{.SystemName}}</td>
+  <td>{{.Equipment}}</td>
+  <td>{{.Unit}}</td>
+  {{if .IsDigital}}
+  <td class="num" colspan="2">{{.State0Text}} / {{.State1Text}}</td>
+  <td class="num">{{alarmStateText .PV}}</td>
+  <td class="num">on change</td>
+  {{else}}
+  <td class="num">{{f .Min}}</td>
+  <td class="num">{{f .Max}}</td>
+  <td class="num">{{optNum .AlarmLow}} / {{optNum .AlarmHigh}}</td>
+  <td class="num">{{f .Deadband}}</td>
+  {{end}}
+  <td class="num">{{.Priority}}</td>
+  <td>{{if .Enabled}}<span class="badge ok">Yes</span>{{else}}<span class="badge none">No</span>{{end}}</td>
+  <td class="actions">
+    <button type="button" hx-get="/config/pvs/{{.ID}}/edit" hx-target="#form-body">Edit</button>
+    <button type="button" class="danger" hx-delete="/config/pvs/{{.ID}}" hx-target="#config-msg"
+            hx-confirm="Delete PV {{.Name}} on {{.PLCName}}?">Delete</button>
+  </td>
+</tr>
+{{else}}
+<tr><td colspan="13" class="muted">No PVs.</td></tr>
+{{end}}
+{{end}}
+
+{{define "config_msg.html"}}
+<div class="msg {{.Class}}">{{.Text}}</div>
+{{end}}
+
+{{define "pv_delete_blocked.html"}}
+<div class="msg error">
+  This PV has {{.Count}} history rows, so it was not deleted.
+  Prefer <strong>disabling</strong> it (Edit → untick Enabled) to keep the history.
+  <button type="button" class="danger" hx-delete="/config/pvs/{{.ID}}?with_history=1" hx-target="#config-msg"
+          hx-confirm="Permanently delete this PV AND its {{.Count}} history rows? This cannot be undone.">
+    Delete PV and its history
+  </button>
+</div>
+{{end}}

@@ -1,0 +1,155 @@
+=====================================================================
+ PLC MONITORING - HOW TO RUN THE PROJECT ON ANOTHER (WINDOWS) DEVICE
+=====================================================================
+Flow:  Simulated PLCs (Python) -> Modbus TCP -> Go app -> PostgreSQL -> Web UI
+
+You need TWO folders from the sender:
+   PLC_Monitoring\   (Go app, migrations, demo SQL, plc_monitoring_full.sql = full DB dump)
+   plc_simulator\    (plc_simulator.py + plc_service.ps1)
+Copy both anywhere, e.g. D:\PLC_Monitoring and D:\plc_simulator.
+(Do NOT copy .env, *.exe or logs\ - they are machine specific.)
+
+---------------------------------------------------------------------
+STEP 1 - INSTALL THE SOFTWARE (one time)
+---------------------------------------------------------------------
+ 1. Go 1.25 or newer      https://go.dev/dl/
+ 2. PostgreSQL (14+)      https://www.postgresql.org/download/windows/
+      - Remember the password you set for user "postgres".
+      - Tick "Command Line Tools" in the installer so psql works.
+ 3. Python 3.9+           https://www.python.org/downloads/
+      - Tick "Add python.exe to PATH" in the installer.
+ Close and reopen PowerShell afterwards, then verify:
+      go version
+      psql --version
+      python --version
+ If psql is "not recognized", add  C:\Program Files\PostgreSQL\<ver>\bin  to PATH
+ (or use its full path in the commands below).
+
+---------------------------------------------------------------------
+STEP 2 - CREATE THE DATABASE AND TABLES (one time)
+---------------------------------------------------------------------
+Open PowerShell in the PLC_Monitoring folder:
+      cd D:\PLC_Monitoring
+
+ 1. Create the empty database (asks for the postgres password):
+      psql -U postgres -c "CREATE DATABASE plc_monitoring;"
+
+ IMPORTANT (Windows): set UTF-8 in THIS PowerShell window before every psql
+ command that loads a .sql file, otherwise characters like the degree sign
+ (°C) get corrupted into "Â°C":
+      $env:PGCLIENTENCODING = "UTF8"
+
+ *** EASIEST: restore the COMPLETE database (tables + all data, ~183k history rows) ***
+      psql -U postgres -d plc_monitoring -f plc_monitoring_full.sql
+    Then skip 2.2 and 2.3 below and continue with STEP 3.
+    (Use this on a FRESH empty database only. Run it once.)
+
+ --- OR build an empty setup from scratch with 2.2 and 2.3: ---
+
+ 2. Create the tables (both scripts are safe to re-run):
+      psql -U postgres -d plc_monitoring -f migrations/001_v01_schema.sql
+      psql -U postgres -d plc_monitoring -f migrations/002_digital_inputs_and_cleanup.sql
+
+ 3. Load the demo setup (3 PLCs: 127.0.0.1 / .2 / .3, with analog + digital points):
+      psql -U postgres -d plc_monitoring -f sql/demo_multi_plc.sql
+
+ NOTE: do not import legacy_backup.sql - it is only an old backup, not needed.
+
+---------------------------------------------------------------------
+STEP 3 - DATABASE PASSWORD (.env file)
+---------------------------------------------------------------------
+The app's default connection is  postgres://postgres@localhost:5432/plc_monitoring
+(no password). Since PostgreSQL on Windows normally HAS a password, do this:
+      copy .env.example .env
+ Then open .env and set the line (use your own password):
+      DATABASE_URL=postgres://postgres:YOUR_PASSWORD@localhost:5432/plc_monitoring
+ If the password contains special characters (@ : / # %), URL-encode them
+ (e.g. @ becomes %40).
+ Other optional settings in .env:
+      HTTP_ADDR=:8080        web UI port
+      CONFIG_RELOAD=10s
+      ACQUISITION=on         "off" = web UI only, no PLC polling
+
+---------------------------------------------------------------------
+STEP 4 - START THE SIMULATED PLCs
+---------------------------------------------------------------------
+      pip install pyModbusTCP
+      cd D:\plc_simulator
+      .\plc_service.ps1 start
+      .\plc_service.ps1 status        (all 3 must say "running")
+
+ If PowerShell blocks the script:
+      powershell -ExecutionPolicy Bypass -File .\plc_service.ps1 start
+ Other commands:  .\plc_service.ps1 stop   |   restart   |   status
+ Logs are in D:\plc_simulator\logs\ (PLC-1.err shows startup errors).
+
+ Quick port check (must print True):
+      Test-NetConnection 127.0.0.1 -Port 502
+
+---------------------------------------------------------------------
+STEP 5 - START THE GO APP
+---------------------------------------------------------------------
+      cd D:\PLC_Monitoring
+      go test ./...                   (optional, first run downloads modules)
+      go run ./cmd/server
+
+ Expected log lines:
+      connected to PostgreSQL
+      web UI on http://localhost:8080
+      acquisition: [PLC-1] started ...   (same for PLC-2, PLC-3)
+
+ Open  http://localhost:8080  in a browser:
+      /          Dashboard with live values
+      /config    add / edit PLCs and points
+ Stop the app with Ctrl+C.
+
+ Start order each day:  1) PostgreSQL running  2) simulators  3) Go app.
+ (If the app starts before the simulators it just retries; values appear
+  once the simulators are up.)
+
+---------------------------------------------------------------------
+OPTION - SIMULATOR ON A DIFFERENT DEVICE THAN THE GO APP
+---------------------------------------------------------------------
+The 127.0.0.x trick only works on ONE machine. Over a network:
+
+ On the simulator device:
+   1. Install Python + "pip install pyModbusTCP", copy plc_simulator.py.
+   2. Find its IP:  ipconfig   (e.g. 192.168.1.50)
+   3. Allow the ports through the firewall (admin PowerShell):
+        New-NetFirewallRule -DisplayName "PLC Sim" -Direction Inbound -Protocol TCP -LocalPort 502-504 -Action Allow
+   4. One terminal per PLC, each on its own port:
+        python plc_simulator.py --host 0.0.0.0 --port 502 --interval 0.1 --quiet
+        python plc_simulator.py --host 0.0.0.0 --port 503 --interval 0.1 --quiet
+        python plc_simulator.py --host 0.0.0.0 --port 504 --interval 0.1 --quiet
+
+ On the Go app device:
+   5. Check the connection:
+        Test-NetConnection 192.168.1.50 -Port 502
+   6. In http://localhost:8080/config edit each PLC: IP = 192.168.1.50,
+      Port = 502 / 503 / 504, Unit ID = 1. Changes apply immediately.
+
+---------------------------------------------------------------------
+TROUBLESHOOTING
+---------------------------------------------------------------------
+ "PostgreSQL: ... password authentication failed"
+      -> wrong/missing password in .env (Step 3).
+ "PostgreSQL: ... database plc_monitoring does not exist"
+      -> Step 2.1 not done.
+ "connectex: ... actively refused" / dashboard shows COMM_FAIL
+      -> simulators not running or the PLC IP/port in /config is wrong.
+         Run .\plc_service.ps1 status and check logs\*.err.
+ "listen tcp :8080: bind: ..."  (port in use)
+      -> set HTTP_ADDR=:8081 in .env.
+ Simulators start then vanish
+      -> start them from a normal PowerShell window; check logs\*.err.
+ Dashboard empty ("No data")
+      -> Step 2.3 (demo SQL) not loaded, or no PLC is enabled in /config.
+ "go: ... requires go >= 1.25"
+      -> upgrade Go.
+ Modules fail to download
+      -> internet needed on the first "go run" / "go test".
+
+ Optional: build a single exe instead of "go run":
+      go build -o plc_monitoring.exe ./cmd/server
+      .\plc_monitoring.exe        (run from the PLC_Monitoring folder so it finds .env)
+=====================================================================

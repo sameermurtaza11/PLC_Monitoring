@@ -1,0 +1,570 @@
+================================================================================
+  PLC MONITORING WEB APPLICATION — VERSION 01
+  Explained: what it is, how it works, and answers to common questions
+================================================================================
+
+  Author / owner : Sameer
+  Stack          : Go + Gin + PostgreSQL + HTMX + Apache ECharts + Modbus TCP
+  Project folder : D:\PLC_Monitoring
+  Simulator      : D:\plc_simulator
+
+  How to use this file
+  --------------------
+  Part 1  = the big picture (read this first, 2 minutes)
+  Part 2  = how it works inside (for technical viewers / developers)
+  Part 3  = using the application (for operators / end users)
+  Part 4  = questions & answers — technical viewers
+  Part 5  = questions & answers — end users / operators
+  Part 6  = limits of Version 01 and what comes next
+  Part 7  = glossary of terms
+
+
+================================================================================
+PART 1 — THE BIG PICTURE
+================================================================================
+
+WHAT IS IT?
+  A web application that watches an industrial plant in real time.
+  It reads live values from several PLCs (the controllers that sit next to
+  the machines), stores every value with a timestamp in a database, and shows
+  them in a web browser: a live table, gauges, status lamps, history trends,
+  and a page to configure which PLCs and signals are monitored.
+
+THE DATA PATH (from the sensor to the screen)
+
+    Instrument (pressure transmitter, temperature sensor, limit switch ...)
+        |
+    PLC input card  (AI = analog input, DI = digital input)
+        |
+    Modbus TCP/IP over the plant network
+        |
+    Go acquisition service  (reads the PLCs, converts raw values)
+        |
+    PostgreSQL database     (configuration + latest values + history)
+        |
+    Gin web backend         (serves pages and data)
+        |
+    Browser: HTMX + ECharts (live table, gauge, lamp, trends)
+
+THE ONE MOST IMPORTANT DESIGN RULE
+  The DATABASE is the source of truth for configuration.
+  No PLC, IP address or register number is written inside the program.
+  To add a PLC or a signal you add a row (through the Configuration page).
+  No code change, no recompile, no restart.
+
+WHAT IT CAN DO TODAY
+  - Monitor many PLCs at the same time, each on its own IP address.
+  - Read Analog Inputs  (Input Registers, 30001+, 16-bit words).
+  - Read Digital Inputs (Discrete Inputs, 10001+, 1-bit ON/OFF).
+  - Also read Holding Registers (40001+, 16-bit words).
+  - Convert raw analog counts into engineering units (bar, °C, m3/h, % ...).
+  - Store every value with an accurate timestamp.
+  - Live dashboard, detail window with gauge or lamp, history trend,
+    compare up to 5 signals on one chart, history table.
+  - Configuration page to add / edit / delete PLCs and signals.
+  - Keep working when one PLC is offline or the database is briefly down.
+
+
+================================================================================
+PART 2 — HOW IT WORKS INSIDE
+================================================================================
+
+2.1  PROGRAM STRUCTURE  (D:\PLC_Monitoring)
+------------------------------------------
+  cmd\server\main.go        Starts everything: database connection,
+                            acquisition, web server. Clean shutdown on Ctrl+C.
+  internal\config\          Reads settings (database URL, web port) from
+                            environment variables or a .env file.
+                            NOTE: no PLC settings here — those live in the DB.
+  internal\plc\             Everything Modbus: address rules, grouping of
+                            reads, the TCP client, bit unpacking.
+  internal\acquisition\     The "engine": one worker per PLC, scan loop,
+                            scaling, reconnection, buffering.
+  internal\store\           Every SQL query of the application, in one place.
+  internal\web\             Web pages (Gin handlers, HTML templates, CSS/JS).
+                            HTMX and ECharts are stored locally, so the app
+                            works in a plant without internet.
+  migrations\               Database setup scripts (001, 002).
+  sql\demo_multi_plc.sql    Demo configuration: 3 PLCs with AI + DI signals.
+
+  Each part has one job. Database code does not talk Modbus, Modbus code does
+  not know about the database, web code does not read PLCs.
+
+2.2  THE DATABASE (4 tables)
+----------------------------
+  plc_metadata   One row per PLC.
+                 name, IP address, port, Modbus unit ID, scan interval,
+                 timeout, enabled yes/no, description.
+
+  pv_metadata    One row per process variable (PV = one signal).
+                 Which PLC it belongs to, register address, PV name, system,
+                 equipment, description, unit, scaling min/max, alarm limits,
+                 deadband, priority, texts for 0/1 (digital), alarm state,
+                 enabled yes/no.
+
+  pv_latest      The newest value of every PV + its quality (GOOD / COMM_FAIL
+                 / READ_FAIL) + time. The dashboard reads only this small
+                 table, so it stays fast no matter how big the history gets.
+
+  pv_history     Every stored sample: PV, timestamp, raw value, engineering
+                 value. Used by the trends and history tables.
+
+  Rules the database itself enforces (they cannot be broken, even by mistake):
+    - A register address is unique WITHIN a PLC.
+    - A PV name is unique WITHIN a PLC.
+    - The same register / name MAY exist on different PLCs.
+      (30001 on PLC-1 and 30001 on PLC-2 are two different physical signals.)
+    - Register must be 10001-19999, 30001-39999 or 40001-49999.
+    - PV max must be greater than PV min.
+    - A signal can't point to a PLC that doesn't exist.
+    - A history sample can't point to a signal that doesn't exist.
+    - No duplicate history row (same PV + same timestamp).
+
+  Old prototype tables (pv_mapping, pv_data, raw_data) were removed by
+  migration 002. Their useful history was moved into pv_history first.
+
+2.3  SIGNAL TYPES — decided by the address (standard Modbus convention)
+-----------------------------------------------------------------------
+  Address        Modbus name         Size    Function   What the app does
+  -------------  ------------------  ------  ---------  -------------------------
+  10001-19999    Discrete Input (DI) 1 bit   FC02       value 0/1, shown as text
+                                                        e.g. STOPPED / RUNNING
+  30001-39999    Input Register (AI) 16 bit  FC04       raw 0-65535 → eng. units
+  40001-49999    Holding Register    16 bit  FC03       raw 0-65535 → eng. units
+
+  The 5-digit number is the "human" address. On the wire Modbus uses a
+  zero-based offset: 30001 → offset 0, 30010 → offset 9, 10001 → offset 0.
+
+2.4  SCALING (analog signals)
+-----------------------------
+  The PLC input card converts the physical signal (for example 4-20 mA) into
+  a raw number 0 … 65535. The application converts that raw number into the
+  engineering value using the min/max stored for that PV:
+
+      PV value = pv_min + (raw / 65535) × (pv_max − pv_min)
+
+  Example: raw = 32768, pv_min = 0, pv_max = 16 bar
+           → 0 + (32768 / 65535) × 16 = 8.00 bar
+
+  Digital inputs are not scaled: 0 stays 0, 1 stays 1.
+
+2.5  THE ACQUISITION ENGINE
+---------------------------
+  Manager
+    - Reads all ENABLED PLCs and their ENABLED PVs from the database.
+    - Starts one independent worker (a goroutine) per PLC.
+    - Re-checks the configuration every 10 seconds, and immediately when
+      something is saved on the Configuration page.
+    - If a PLC's settings or its PV list changed, only THAT worker restarts.
+
+  Worker (one per PLC)
+    - Keeps one Modbus TCP connection open to its PLC (no reconnect per read).
+    - Every scan interval (default 1000 ms, set per PLC):
+        1. Reads the configured points in as FEW requests as possible.
+           Neighbouring addresses of the same type are read together.
+           Example: 10001..10016 = one request, 30001..30010 = one request.
+        2. Stamps the time the PLC answered.
+        3. Converts raw → engineering value.
+        4. Writes the whole scan to PostgreSQL in ONE transaction
+           (latest values + history + any failures).
+    - If the PLC does not answer: marks its PVs COMM_FAIL, closes the socket,
+      and retries after 1 s, 2 s, 4 s ... up to every 30 s.
+    - If the PLC answers with an error (e.g. address does not exist):
+      marks only those PVs READ_FAIL and keeps the connection.
+
+  What gets stored in history
+    - Analog, deadband 0     : every scan.
+    - Analog, deadband > 0   : only when the value changed by at least the
+                               deadband, plus one row per minute ("heartbeat").
+    - Digital                : only when the state changes, plus one row per
+                               minute. No change is ever missed, because every
+                               scan is compared with the last stored state.
+
+  Reliability features
+    - One PLC down → only that PLC's values show COMM_FAIL; the others continue.
+    - Database briefly down → samples are kept in memory (up to 200,000 per
+      PLC) and written automatically when the database is back. Tested: a
+      5-second database stop produced no gap in the history.
+    - A PV deleted while a scan is in progress cannot jam the writer.
+
+2.6  THE WEB LAYER
+------------------
+  Gin serves HTML pages. HTMX updates parts of the page from the server
+  (for example the table every 2 seconds) without a heavy JavaScript
+  framework. ECharts draws the gauge and the trends. All HTML is escaped
+  (html/template), and all SQL uses parameters, so typed text can't inject
+  code or SQL.
+
+2.7  THE SIMULATOR (D:\plc_simulator)
+-------------------------------------
+  plc_simulator.py  A Python Modbus TCP server that behaves like a small PLC:
+                    16 digital inputs (10001-10016) and 10 analog inputs
+                    (30001-30010). Analog = slow sine waves with noise;
+                    digital = on/off signals with different periods; DI16 is a
+                    random "trip". Each simulated PLC gets different values.
+  plc_service.ps1   Starts / stops / checks 3 simulated PLCs at once:
+                    PLC-1 127.0.0.1:502, PLC-2 127.0.0.2:502, PLC-3 127.0.0.3:502.
+                    (Every 127.x.x.x address is local on Windows, so each
+                    simulated PLC gets its own IP without extra hardware.)
+
+
+================================================================================
+PART 3 — USING THE APPLICATION
+================================================================================
+
+Open a browser at:  http://localhost:8080   (or http://<server-ip>:8080)
+
+3.1  DASHBOARD  (page "Dashboard")
+----------------------------------
+  One row per signal, refreshed every 2 seconds.
+
+  Column     Meaning
+  ---------  -------------------------------------------------------------
+  PLC        Which controller the signal comes from.
+  Register   Modbus address + type tag: DI (digital), AI (analog), HR.
+  PV Name    Tag name of the signal (e.g. PT101, XS201).
+  Raw        The number the PLC sent (0-65535, or 0/1 for digital).
+  Value      Engineering value (e.g. 6.38) or state text (e.g. RUNNING).
+  Unit       bar, °C, %, m3/h ... (empty for digital signals).
+  Status     See table below.
+  Updated    Time of the last reading.
+  More       Opens the detail window.
+
+  Status     Meaning / what to do
+  ---------  -------------------------------------------------------------
+  Normal     Value is fresh and inside its limits.
+  HIGH       Analog value is at or above its high alarm limit.
+  LOW        Analog value is at or below its low alarm limit.
+  ALARM      Digital signal is in its alarm state (e.g. TRIP = 1).
+  STALE      No new reading for 3 scan intervals (min. 5 s) — value may be
+             old. Check that the application / PLC is running.
+  COMM_FAIL  The PLC can't be reached (cable, power, IP, network).
+             The app keeps retrying automatically.
+  READ_FAIL  PLC answered but refused this address (wrong register number
+             or address not configured in the PLC program).
+  No data    Signal is configured but no reading has arrived yet.
+
+3.2  DETAIL WINDOW  (button "More")
+-----------------------------------
+  Top left
+    Analog  → a live gauge from PV min to PV max. If alarm limits are set,
+              the dial is coloured: amber below low, green normal, red above
+              high.
+    Digital → a status lamp: green = ON-state, grey = OFF-state,
+              amber = alarm state, dashed = no trustworthy value.
+    Under it: current value, status, raw value, time. Refreshes every 2 s.
+
+  Top right
+    All configuration of the signal: PLC, register, type, system,
+    equipment, description, unit, scaling, alarm limits, deadband,
+    priority, scan interval.
+
+  History trend
+    - Range: 15 min, 1 h, 6 h, 24 h, 7 days. Refreshes every 10 s.
+    - Zoom with the mouse wheel or the slider under the chart.
+    - Hover to see exact time and values.
+    - Digital signals are drawn as steps (a state holds until it changes).
+
+  Compare with …
+    - Pick up to 4 more signals (from any PLC) — they appear as coloured
+      chips; click ✕ on a chip to remove it.
+    - Same unit (e.g. all bar)   → real values on one axis.
+    - Different units, or digital mixed with analog → every line is shown
+      as "% of its own range" so they fit on one chart
+      (digital: 0 % = OFF, 100 % = ON). Hover still shows real values.
+
+  History table
+    Same data as the chart, newest first. For long ranges the data is
+    grouped into time buckets and shows Avg / Min / Max / Samples, so short
+    spikes are never hidden. For a digital signal, Avg = fraction of time ON
+    (0.25 = ON 25 % of the time).
+
+3.3  CONFIGURATION  (page "Configuration")
+------------------------------------------
+  PLCs section
+    + Add PLC  → name, IP address, port (normally 502), Modbus unit ID,
+                 scan interval (ms), timeout (ms), description, enabled.
+    Edit / Delete per row.
+
+  PVs section
+    Filter by PLC. + Add PV → choose the PLC, type the register address.
+    The form changes automatically:
+      - Address 1xxxx (digital) → text for 0, text for 1, alarm when 0/1.
+      - Address 3xxxx / 4xxxx (analog) → unit, PV min, PV max,
+        alarm low/high, deadband.
+    Common: PV name, priority, system, equipment, description, enabled.
+
+  Saving takes effect immediately — the monitoring picks it up within a
+  second, without restarting anything.
+
+  Mistakes are caught with a clear message next to the field, e.g.:
+    "This register is already used by another PV on this PLC"
+    "PV max must be greater than PV min"
+    "Enter a valid IPv4 address"
+
+  Delete protection
+    - A PLC that still has signals can't be deleted (delete or move the
+      signals first, or simply disable the PLC).
+    - A signal with history is not deleted by accident: you get a warning
+      and a separate "Delete PV and its history" button with a second
+      confirmation. Usually better: untick "Enabled" — it stops monitoring
+      but keeps all history.
+
+
+================================================================================
+PART 4 — QUESTIONS & ANSWERS: TECHNICAL VIEWERS / DEVELOPERS
+================================================================================
+
+Q: Why Go?
+A: Fast, compiles to one .exe, very good at running many tasks at the same
+   time (one goroutine per PLC costs almost nothing), strong standard library,
+   simple to deploy on a plant PC.
+
+Q: Why HTMX instead of React / Vue / Angular?
+A: The server already has the data and renders the HTML. HTMX just swaps
+   parts of the page (table rows, forms, history). No build step, no large
+   JavaScript bundle, easy to maintain. JavaScript is used only where it is
+   really needed: drawing ECharts gauges and trends.
+
+Q: Why PostgreSQL?
+A: Reliable, free, handles time-stamped data well, and enforces the
+   configuration rules (unique register per PLC, etc.) with constraints and
+   foreign keys, so bad data can't get in even through direct SQL.
+
+Q: Which Modbus library?
+A: github.com/goburrow/modbus for the Go client; pyModbusTCP for the
+   simulator server.
+
+Q: How do you avoid hard-coding PLCs?
+A: At start and every 10 s (or instantly after a save) the manager runs
+   SELECT … FROM plc_metadata WHERE enabled, and for each PLC the PVs from
+   pv_metadata. Workers are started / restarted / stopped to match.
+   The code contains no IP address or register number.
+
+Q: The same register exists on two PLCs — how is that handled?
+A: Every PV is linked to its PLC by plc_id. Each worker only reads the PVs of
+   its own PLC over its own connection. The uniqueness rule is
+   (plc_id, register_address), not register_address alone.
+
+Q: Why plc_id and not plc_name to link a PV to a PLC?
+A: If you rename a PLC, the link does not break. Names are for people,
+   IDs are for relationships.
+
+Q: How low is the latency?
+A: A scan is: one Modbus request per group of addresses (typically 2 per PLC)
+   + one database transaction. On a local network this is a few
+   milliseconds. The dashboard refreshes every 2 s, the scan interval is set
+   per PLC (default 1000 ms, minimum 100 ms).
+
+Q: Why not scan every 10 ms like the first prototype?
+A: 10 signals × 100 scans/s = 1,000 rows per second ≈ 86 million rows per day.
+   That fills the disk and slows the database without adding useful
+   information for monitoring. Scan rate is configurable per PLC if a
+   faster process needs it.
+
+Q: How are several addresses read in one request?
+A: Addresses of the same type are sorted and merged into blocks. Registers:
+   up to 125 per request, bridging gaps of up to 8 unused registers.
+   Discrete inputs: up to 2,000 bits per request, gaps up to 64.
+   Example: 30001, 30002, 30004 → one request of 4 registers.
+
+Q: How are digital inputs decoded?
+A: Modbus returns discrete inputs packed 8 per byte, first input in the
+   lowest bit. The app unpacks them to 0/1. This was cross-checked against
+   an independent Modbus client: 8 of 8 matched.
+
+Q: What happens when the database goes down?
+A: Each worker keeps the unsaved history in memory (max 200,000 samples per
+   PLC; the oldest are dropped only beyond that) and writes it when the
+   database returns. Errors that would fail forever (integrity violations)
+   are dropped instead of blocking all later writes.
+
+Q: What happens when a PLC goes down?
+A: Only that worker is affected. Its PVs turn COMM_FAIL on the dashboard,
+   the last good value and time are kept, and it reconnects with growing
+   waits (1, 2, 4 … 30 s). Tested by stopping one simulated PLC.
+
+Q: How is the timestamp taken?
+A: In the Go service at the moment the PLC's reply arrives, in UTC, stored as
+   timestamptz. The browser shows local time.
+
+Q: How is history kept small?
+A: Digital: store on change (+1/min). Analog: optional deadband (+1/min).
+   For display, long ranges are averaged into ~1,000 buckets per signal on
+   the server, with min/max kept.
+
+Q: Why don't you use two Y-axes when comparing different units?
+A: Dual axes are easy to misread (lines seem to cross when they don't).
+   Instead, mixed units are shown as "% of each signal's range" on one axis
+   and the tooltip shows real values.
+
+Q: Is it secure?
+A: Version 01 has no login (see Part 6). What is in place: parameterised SQL
+   (no SQL injection), escaped HTML (no script injection), database password
+   in .env / environment variable, not in the code.
+
+Q: How is it tested?
+A: Unit tests (address parsing, block building, bit unpacking, scaling:
+   "go test ./..."), plus end-to-end tests against a real PostgreSQL and
+   simulated PLCs: multi-PLC on different IPs, PLC failure, database outage,
+   configuration changes, all CRUD validations, browser screenshots.
+
+Q: How do I connect a REAL PLC?
+A: Configuration → + Add PLC with the PLC's real IP, port 502 and unit ID,
+   then add PVs with the addresses from the PLC program. Make sure the PLC
+   has Modbus TCP server enabled and the PC can reach it (ping the IP).
+
+Q: How do I start it?
+A: In D:\PLC_Monitoring:  go run ./cmd/server   (or build: go build -o
+   plcmon.exe ./cmd/server and run plcmon.exe). Open http://localhost:8080.
+   Settings in .env: DATABASE_URL, HTTP_ADDR (default :8080),
+   CONFIG_RELOAD (default 10s), ACQUISITION (on/off).
+
+
+================================================================================
+PART 5 — QUESTIONS & ANSWERS: END USERS / OPERATORS
+================================================================================
+
+Q: What am I looking at on the first page?
+A: The live value of every monitored signal from every PLC, updated every
+   2 seconds.
+
+Q: What do the colours mean?
+A: Green "Normal" = OK. Amber "HIGH / LOW / ALARM" = the value is outside its
+   limit or a digital alarm is active. Red "COMM_FAIL / READ_FAIL / STALE" =
+   the value can't be trusted (communication problem). Grey "No data" =
+   nothing received yet.
+
+Q: What is the difference between "Raw" and "Value"?
+A: Raw is the number the PLC sends (0 to 65535). Value is that number
+   converted to real units, e.g. 6.38 bar. For digital signals Raw is 0 or 1
+   and Value is the text, e.g. RUNNING.
+
+Q: What do DI, AI and HR mean next to the register?
+A: DI = Digital Input (ON/OFF: pump running, valve open, switch).
+   AI = Analog Input (a measured amount: pressure, temperature, level).
+   HR = Holding Register (a 16-bit value stored in the PLC).
+
+Q: A signal shows COMM_FAIL. What should I do?
+A: The PLC is not reachable. Check PLC power, network cable / switch, and that
+   the IP in Configuration is correct. You don't have to restart the
+   application: it reconnects by itself as soon as the PLC answers.
+
+Q: A signal shows READ_FAIL.
+A: The PLC is online but refuses that address. Usually the register number in
+   Configuration does not exist in the PLC program. Correct the address.
+
+Q: A signal shows STALE.
+A: No new value has arrived for a while. Check that the monitoring
+   application is still running.
+
+Q: How do I see the history of a signal?
+A: Click "More", then choose the range (15 min … 7 days) above the chart.
+   Zoom with the mouse wheel or the slider. The table under the chart lists
+   the same values with timestamps.
+
+Q: How do I compare two signals?
+A: In the detail window use "Compare with" and pick another signal (up to 4
+   extra). If units differ, the chart shows each as % of its range; hover the
+   chart to read the real values.
+
+Q: Why does a digital signal have fewer history rows than an analog one?
+A: Digital signals are stored every time they change (and once per minute),
+   not every second. Every change is recorded with its time, nothing is lost.
+
+Q: Why do I see Avg / Min / Max in the history table?
+A: For long ranges (e.g. 7 days) there are too many readings to show one by
+   one, so they are grouped into short time slices. Min and Max make sure a
+   short spike is still visible.
+
+Q: How do I add a new signal?
+A: Configuration → + Add PV → choose the PLC, type the register address,
+   name, and (analog) unit + min/max or (digital) texts for 0 and 1 →
+   Save. It appears on the dashboard within seconds.
+
+Q: How do I add a new PLC?
+A: Configuration → + Add PLC → name, IP address, port 502, unit ID →
+   Save. Then add its signals.
+
+Q: I get an error when saving.
+A: Read the red message under the field — it says exactly what is wrong
+   (duplicate address on the same PLC, max not above min, invalid IP ...).
+
+Q: How do I stop monitoring a signal without losing its history?
+A: Edit the signal and untick "Enabled". Monitoring stops, history stays.
+   Tick it again later to resume.
+
+Q: Can I delete a PLC?
+A: Only when it has no signals. Delete or move its signals first, or just
+   disable the PLC.
+
+Q: Does it work without internet?
+A: Yes. Everything (including the chart library) is served by the
+   application itself. It only needs the plant network to the PLCs.
+
+Q: Can several people open it at the same time?
+A: Yes, from any PC that can reach the server: http://<server-ip>:8080.
+   Everyone sees the same live data.
+
+
+================================================================================
+PART 6 — LIMITS OF VERSION 01 AND NEXT STEPS
+================================================================================
+
+  Not included in Version 01 (by design, to keep it simple and reliable):
+    - No user login / roles. Anyone who can open the page can change the
+      configuration. → Put it on a protected plant network for now.
+    - No automatic deletion of very old history (retention). History grows
+      over time; plan disk space or add retention in a next version.
+    - No alarm log / acknowledgement (alarms are shown live, not archived as
+      events).
+    - Coils (00001+) and writing values to the PLC are not supported —
+      this is a monitoring (read-only) system.
+    - Analog scaling assumes a 16-bit raw range of 0-65535 for every analog
+      signal. Signed values, 32-bit values and floats need a data-type field
+      in a later version.
+    - Not yet installed as a Windows service (it runs as a program).
+
+  Good candidates for Version 02:
+    history retention, alarm/event log with acknowledge, login and roles,
+    Windows service, data types (INT16/UINT16/INT32/FLOAT32), coils,
+    export to CSV/Excel, e-mail/SMS alarm notification.
+
+
+================================================================================
+PART 7 — GLOSSARY
+================================================================================
+
+  PLC            Programmable Logic Controller — the industrial computer that
+                 reads sensors and controls machines.
+  PV             Process Variable — one monitored signal (a pressure, a pump
+                 status ...).
+  AI             Analog Input — continuous value (4-20 mA, 0-10 V → 0-65535).
+  DI             Digital Input — ON/OFF value (0 or 1).
+  Modbus TCP     Standard industrial protocol to read/write PLC data over
+                 Ethernet, normally on TCP port 502.
+  Register       16-bit memory location in the PLC (Input Register 3xxxx,
+                 Holding Register 4xxxx).
+  Discrete Input 1-bit read-only input in the PLC (1xxxx).
+  Unit ID        Modbus address of the device behind an IP (usually 1).
+  FC02/FC03/FC04 Modbus function codes: read discrete inputs / holding
+                 registers / input registers.
+  Scan interval  How often a PLC is read (e.g. 1000 ms).
+  Scaling        Conversion from raw 0-65535 to engineering units.
+  Engineering    The value in real units (bar, °C, %).
+  value
+  Deadband       Minimum change needed before a new analog history row is
+                 stored.
+  Heartbeat      One history row per minute even without change, proving the
+                 signal is still alive.
+  COMM_FAIL      PLC not reachable.
+  READ_FAIL      PLC reachable but refused that address.
+  STALE          Value not updated for too long.
+  Migration      A database script that creates or changes tables.
+  HTMX           Small library that lets the server update parts of a web page.
+  ECharts        Apache chart library used for gauges and trends.
+  Goroutine      A lightweight parallel task in Go (one per PLC here).
+
+================================================================================
+  End of document
+================================================================================

@@ -1,0 +1,82 @@
+{{define "pv_detail.html"}}{{$pv := .PV}}{{$s := status $pv}}
+<div class="detail" data-pv-id="{{$pv.ID}}">
+  <h2>{{$pv.Name}} <span class="muted">· {{$pv.PLCName}} · {{$pv.RegisterAddress}}</span></h2>
+
+  <div class="detail-top">
+    <div class="gauge-wrap">
+      {{if $pv.IsDigital}}
+      <!-- Digital input: a lamp instead of a gauge. app.js switches it from data-value. -->
+      <div id="pv-lamp" class="lamp" data-state0="{{$pv.State0Text}}" data-state1="{{$pv.State1Text}}"
+           data-alarm-state="{{if $pv.AlarmState}}{{deref2 $pv.AlarmState}}{{end}}">
+        <span class="lamp-dot"></span><span class="lamp-text">—</span>
+      </div>
+      {{else}}
+      <!-- Live gauge (ECharts). Scale = pv_min … pv_max from pv_metadata. -->
+      <div id="pv-gauge" class="gauge"
+           data-min="{{f $pv.Min}}" data-max="{{f $pv.Max}}" data-unit="{{$pv.Unit}}"
+           data-alarm-low="{{rawValue $pv.AlarmLow}}" data-alarm-high="{{rawValue $pv.AlarmHigh}}"></div>
+      {{end}}
+      <!-- Refreshed every 2 s while the modal is open; app.js moves the gauge needle. -->
+      <div hx-get="/pv/{{$pv.ID}}/live" hx-trigger="every 2s [document.getElementById('pv-modal').open]"
+           hx-target="this" hx-swap="innerHTML" class="live-wrap">
+        {{template "pv_live.html" $pv}}
+      </div>
+    </div>
+
+    <dl class="meta">
+      <dt>PLC</dt><dd>{{$pv.PLCName}}</dd>
+      <dt>Register</dt><dd>{{$pv.RegisterAddress}} <span class="tag">{{kind $pv.RegisterAddress}}</span></dd>
+      <dt>System</dt><dd>{{orDash $pv.SystemName}}</dd>
+      <dt>Equipment</dt><dd>{{orDash $pv.Equipment}}</dd>
+      <dt>Description</dt><dd>{{orDash $pv.Description}}</dd>
+      {{if $pv.IsDigital}}
+      <dt>Type</dt><dd>Discrete input, 1 bit (FC02)</dd>
+      <dt>States</dt><dd>0 = {{$pv.State0Text}} · 1 = {{$pv.State1Text}}</dd>
+      <dt>Alarm</dt><dd>{{alarmStateText $pv.PV}}</dd>
+      <dt>History</dt><dd>stored on every state change (+1/min)</dd>
+      {{else}}
+      <dt>Type</dt><dd>{{if ge $pv.RegisterAddress 40001}}Holding register{{else}}Input register{{end}}, 16 bit</dd>
+      <dt>Unit</dt><dd>{{orDash $pv.Unit}}</dd>
+      <dt>Scaling</dt><dd>{{f $pv.Min}} … {{f $pv.Max}} (raw 0 … 65535)</dd>
+      <dt>Alarm low / high</dt><dd>{{optNum $pv.AlarmLow}} / {{optNum $pv.AlarmHigh}}</dd>
+      <dt>Deadband</dt><dd>{{f $pv.Deadband}}</dd>
+      {{end}}
+      <dt>Priority</dt><dd>{{$pv.Priority}}</dd>
+      <dt>Scan interval</dt><dd>{{$pv.ScanIntervalMS}} ms</dd>
+    </dl>
+  </div>
+
+  <!-- Trend controls. Any change re-requests /pv/{id}/history via HTMX. -->
+  <form id="trend-form" class="trend-controls"
+        hx-get="/pv/{{$pv.ID}}/history" hx-target="#history" hx-swap="innerHTML"
+        hx-trigger="load, change from:#range-select, refresh, every 10s [document.getElementById('pv-modal').open]">
+    <label>Range
+      <select name="range" id="range-select">
+        {{range .Ranges}}<option value="{{.}}" {{if eq . "1h"}}selected{{end}}>{{.}}</option>{{end}}
+      </select>
+    </label>
+    <label>Compare with
+      <select id="compare-add">
+        <option value="">+ add PV…</option>
+        {{range .Options}}{{if ne .ID $pv.ID}}
+        <option value="{{.ID}}">{{.PLCName}} / {{.Name}}{{if .Unit}} ({{.Unit}}){{end}}</option>
+        {{end}}{{end}}
+      </select>
+    </label>
+    <!-- chips for compared PVs are added here by app.js as hidden inputs -->
+    <span id="compare-chips"></span>
+  </form>
+
+  <div id="pv-trend" class="trend" role="img" aria-label="History trend"></div>
+  <div id="history"><p class="muted">Loading history…</p></div>
+</div>
+{{end}}
+
+{{define "pv_live.html"}}{{$s := status .}}
+<div class="current" data-value="{{rawValue .Value}}" data-quality="{{$s.Text}}">
+  <span class="badge {{$s.Class}}">{{$s.Text}}</span>
+  <span class="strong">{{display .}}{{if not .IsDigital}} {{.Unit}}{{end}}</span>
+  <div class="muted">Raw {{int .Raw}} · {{time .TS}}</div>
+  {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+</div>
+{{end}}

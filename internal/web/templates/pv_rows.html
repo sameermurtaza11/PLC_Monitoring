@@ -1,0 +1,26 @@
+{{define "pv_rows.html"}}
+{{range .}}{{$s := status .}}
+<tr>
+  <td>{{.PLCName}}</td>
+  <td>{{.RegisterAddress}} <span class="tag">{{kind .RegisterAddress}}</span></td>
+  <td>{{.Name}}</td>
+  <td class="num">{{int .Raw}}</td>
+  {{if .IsDigital}}
+  <td class="num"><span class="state {{if and .Value (gt (deref .Value) 0.5)}}on{{else}}off{{end}}">{{display .}}</span></td>
+  <td></td>
+  {{else}}
+  <td class="num strong">{{display .}}</td>
+  <td>{{.Unit}}</td>
+  {{end}}
+  <td><span class="badge {{$s.Class}}">{{$s.Text}}</span></td>
+  <td class="muted">{{time .TS}}</td>
+  <td><button type="button" hx-get="/pv/{{.ID}}" hx-target="#pv-detail" hx-swap="innerHTML">More</button></td>
+</tr>
+{{else}}
+<tr><td colspan="9" class="muted">No PVs configured. Add rows to plc_metadata and pv_metadata.</td></tr>
+{{end}}
+{{end}}
+
+{{define "pv_rows_error.html"}}
+<tr><td colspan="9" class="error">Database error: {{.}}</td></tr>
+{{end}}

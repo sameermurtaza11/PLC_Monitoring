@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Configuration · PLC Monitoring</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/htmx.min.js"></script>
+  <script src="/static/config.js" defer></script>
+</head>
+<body>
+  {{template "nav" .}}
+
+  <main>
+    <p class="muted">Stored in <code>plc_metadata</code> / <code>pv_metadata</code>.
+      Saved changes are applied to acquisition immediately — no restart or recompile.</p>
+
+    <!-- Messages from delete actions land here -->
+    <div id="config-msg" aria-live="polite"></div>
+
+    <section>
+      <div class="section-head">
+        <h2>PLCs</h2>
+        <button type="button" class="primary" hx-get="/config/plcs/new" hx-target="#form-body">+ Add PLC</button>
+      </div>
+      <table class="pv-table">
+        <thead>
+          <tr><th>Name</th><th>IP : Port</th><th class="num">Unit ID</th><th class="num">Scan (ms)</th>
+              <th class="num">Timeout (ms)</th><th>Enabled</th><th class="num">PVs</th><th>Description</th><th></th></tr>
+        </thead>
+        <tbody hx-get="/config/plcs" hx-trigger="configSaved from:body" hx-swap="innerHTML">
+          {{template "plc_rows.html" .PLCs}}
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>PVs</h2>
+        <label class="muted">PLC
+          <select id="pv-filter" name="plc" hx-get="/config/pvs" hx-target="#pv-rows" hx-trigger="change">
+            <option value="0">All</option>
+            {{range .PLCs}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+          </select>
+        </label>
+        <button type="button" class="primary" hx-get="/config/pvs/new" hx-include="#pv-filter" hx-target="#form-body">+ Add PV</button>
+      </div>
+      <div class="table-scroll">
+      <table class="pv-table">
+        <thead>
+          <tr><th>PLC</th><th>Register</th><th>PV Name</th><th>System</th><th>Equipment</th><th>Unit</th>
+              <th class="num">Min / 0-text</th><th class="num">Max / 1-text</th><th class="num">Alarm</th>
+              <th class="num">History</th><th class="num">Prio</th><th>Enabled</th><th></th></tr>
+        </thead>
+        <tbody id="pv-rows" hx-get="/config/pvs" hx-include="#pv-filter"
+               hx-trigger="load, configSaved from:body" hx-swap="innerHTML">
+        </tbody>
+      </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- Add / edit form dialog -->
+  <dialog id="form-modal" class="form-dialog">
+    <div class="modal-head">
+      <strong id="form-title">Edit</strong>
+      <button type="button" onclick="document.getElementById('form-modal').close()" aria-label="Close">✕</button>
+    </div>
+    <div id="form-body"></div>
+  </dialog>
+</body>
+</html>

@@ -1,0 +1,95 @@
+{{define "field_error"}}{{with index .Errors .Name}}<div class="field-error">{{.}}</div>{{end}}{{end}}
+
+{{define "plc_form.html"}}
+<form hx-post="/config/plcs{{if .ID}}/{{.ID}}{{end}}" hx-target="#form-body" class="cfg-form"
+      data-title="{{if .ID}}Edit PLC{{else}}Add PLC{{end}}">
+  {{with index .Errors "_"}}<div class="msg error">{{.}}</div>{{end}}
+  <div class="grid2">
+    <label>PLC name *<input name="plc_name" value="{{.V "plc_name"}}" required maxlength="64" autofocus>
+      {{template "field_error" (fe . "plc_name")}}</label>
+    <label>IP address *<input name="ip_address" value="{{.V "ip_address"}}" required placeholder="192.168.1.10">
+      {{template "field_error" (fe . "ip_address")}}</label>
+    <label>Port *<input name="port" type="number" min="1" max="65535" value="{{.V "port"}}" required>
+      {{template "field_error" (fe . "port")}}</label>
+    <label>Modbus unit ID *<input name="unit_id" type="number" min="0" max="255" value="{{.V "unit_id"}}" required>
+      {{template "field_error" (fe . "unit_id")}}</label>
+    <label>Scan interval (ms) *<input name="scan_interval_ms" type="number" min="100" value="{{.V "scan_interval_ms"}}" required>
+      {{template "field_error" (fe . "scan_interval_ms")}}</label>
+    <label>Timeout (ms) *<input name="timeout_ms" type="number" min="100" max="60000" value="{{.V "timeout_ms"}}" required>
+      {{template "field_error" (fe . "timeout_ms")}}</label>
+  </div>
+  <label>Description<input name="description" value="{{.V "description"}}"></label>
+  <label class="check"><input type="checkbox" name="enabled" {{if .Checked "enabled"}}checked{{end}}> Enabled (acquire data from this PLC)</label>
+  <div class="form-actions">
+    <button type="button" onclick="document.getElementById('form-modal').close()">Cancel</button>
+    <button type="submit" class="primary">Save</button>
+  </div>
+</form>
+{{end}}
+
+{{define "pv_form.html"}}
+<form hx-post="/config/pvs{{if .ID}}/{{.ID}}{{end}}" hx-target="#form-body" class="cfg-form" id="pv-form"
+      data-title="{{if .ID}}Edit PV{{else}}Add PV{{end}}">
+  {{with index .Errors "_"}}<div class="msg error">{{.}}</div>{{end}}
+  <div class="grid2">
+    <label>PLC *
+      <select name="plc_id" required>
+        <option value="">— select —</option>
+        {{$sel := .V "plc_id"}}
+        {{range .PLCs}}<option value="{{.ID}}" {{if eq (printf "%d" .ID) $sel}}selected{{end}}>{{.Name}} ({{.IP}}:{{.Port}})</option>{{end}}
+      </select>
+      {{template "field_error" (fe . "plc_id")}}</label>
+    <label>Register address *<input name="register_address" type="number" value="{{.V "register_address"}}" required placeholder="10001 or 30001">
+      <span class="hint" id="reg-hint">10001–19999 digital input (1 bit) · 30001–39999 input register · 40001–49999 holding register</span>
+      {{template "field_error" (fe . "register_address")}}</label>
+    <label>PV name *<input name="pv_name" value="{{.V "pv_name"}}" required maxlength="64">
+      {{template "field_error" (fe . "pv_name")}}</label>
+    <label>Priority (1 = highest) *<input name="priority" type="number" min="1" max="5" value="{{.V "priority"}}" required>
+      {{template "field_error" (fe . "priority")}}</label>
+    <label>System<input name="system_name" value="{{.V "system_name"}}"></label>
+    <label>Equipment<input name="equipment" value="{{.V "equipment"}}"></label>
+  </div>
+
+  <!-- Analog (3xxxx / 4xxxx): scaling, unit, alarms, deadband -->
+  <fieldset class="grid2 analog-only">
+    <legend>Analog — 16-bit register, scaled</legend>
+    <label>Unit<input name="unit" value="{{.V "unit"}}" placeholder="bar, °C, %">
+      {{template "field_error" (fe . "unit")}}</label>
+    <label>Deadband (history)<input name="deadband" type="number" step="any" min="0" value="{{.V "deadband"}}">
+      <span class="hint">0 = store every scan</span>
+      {{template "field_error" (fe . "deadband")}}</label>
+    <label>PV min (raw 0) *<input name="pv_min" type="number" step="any" value="{{.V "pv_min"}}">
+      {{template "field_error" (fe . "pv_min")}}</label>
+    <label>PV max (raw 65535) *<input name="pv_max" type="number" step="any" value="{{.V "pv_max"}}">
+      {{template "field_error" (fe . "pv_max")}}</label>
+    <label>Alarm low<input name="alarm_low" type="number" step="any" value="{{.V "alarm_low"}}" placeholder="none">
+      {{template "field_error" (fe . "alarm_low")}}</label>
+    <label>Alarm high<input name="alarm_high" type="number" step="any" value="{{.V "alarm_high"}}" placeholder="none">
+      {{template "field_error" (fe . "alarm_high")}}</label>
+  </fieldset>
+
+  <!-- Digital (1xxxx): state texts and alarm state -->
+  <fieldset class="grid2 digital-only">
+    <legend>Digital — 1-bit discrete input</legend>
+    <label>Text for 0 *<input name="state0_text" value="{{.V "state0_text"}}" maxlength="32" placeholder="OFF / STOPPED / CLOSED">
+      {{template "field_error" (fe . "state0_text")}}</label>
+    <label>Text for 1 *<input name="state1_text" value="{{.V "state1_text"}}" maxlength="32" placeholder="ON / RUNNING / OPEN">
+      {{template "field_error" (fe . "state1_text")}}</label>
+    <label>Alarm
+      <select name="alarm_state">
+        <option value="" {{if eq (.V "alarm_state") ""}}selected{{end}}>No alarm</option>
+        <option value="0" {{if eq (.V "alarm_state") "0"}}selected{{end}}>Alarm when 0</option>
+        <option value="1" {{if eq (.V "alarm_state") "1"}}selected{{end}}>Alarm when 1</option>
+      </select>
+      {{template "field_error" (fe . "alarm_state")}}</label>
+    <span class="hint">History is stored on every state change (+1 row/min).</span>
+  </fieldset>
+
+  <label>Description<input name="description" value="{{.V "description"}}"></label>
+  <label class="check"><input type="checkbox" name="enabled" {{if .Checked "enabled"}}checked{{end}}> Enabled (acquire this PV)</label>
+  <div class="form-actions">
+    <button type="button" onclick="document.getElementById('form-modal').close()">Cancel</button>
+    <button type="submit" class="primary">Save</button>
+  </div>
+</form>
+{{end}}

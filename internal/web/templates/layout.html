@@ -1,0 +1,9 @@
+{{define "nav"}}
+<header>
+  <h1>PLC Monitoring</h1>
+  <nav>
+    <a href="/" {{if eq .Page "dashboard"}}class="active"{{end}}>Dashboard</a>
+    <a href="/config" {{if eq .Page "config"}}class="active"{{end}}>Configuration</a>
+  </nav>
+</header>
+{{end}}

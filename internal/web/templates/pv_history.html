@@ -1,0 +1,36 @@
+{{define "pv_history.html"}}
+<!-- Chart data. app.js reads this after the swap and redraws the trend. -->
+<script type="application/json" id="history-data">{{.Chart}}</script>
+
+<div class="history-head">
+  <strong>History</strong>
+  <span class="muted">{{ts .From}} → {{ts .To}} · {{len .Table}} rows
+  {{if .Bucketed}}· averaged into time buckets (min/max kept; for digital inputs Avg = fraction of time ON){{end}}</span>
+</div>
+
+<div class="history-table-wrap">
+<table class="history-table">
+  <thead>
+    <tr>
+      <th>Timestamp</th><th>PV</th>
+      <th class="num">{{if .Bucketed}}Avg{{else}}Value{{end}}</th>
+      {{if .Bucketed}}<th class="num">Min</th><th class="num">Max</th><th class="num">Samples</th>{{end}}
+      <th>Unit</th>
+    </tr>
+  </thead>
+  <tbody>
+  {{range .Table}}
+    <tr>
+      <td>{{ts .TS}}</td>
+      <td><span class="swatch" style="background: {{.Color}}"></span>{{.Label}}</td>
+      <td class="num">{{if and .Digital (eq .Count 1)}}{{.StateText}}{{else}}{{fmt2 .Value}}{{end}}</td>
+      {{if $.Bucketed}}<td class="num">{{fmt2 .Min}}</td><td class="num">{{fmt2 .Max}}</td><td class="num">{{.Count}}</td>{{end}}
+      <td>{{.Unit}}</td>
+    </tr>
+  {{else}}
+    <tr><td colspan="7" class="muted">No history in this range.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{end}}

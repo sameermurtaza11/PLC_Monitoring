@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PLC Monitoring</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/htmx.min.js"></script>
+  <script src="/static/echarts.min.js"></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  {{template "nav" .}}
+
+  <main>
+    <table class="pv-table">
+      <thead>
+        <tr>
+          <th>PLC</th>
+          <th>Register</th>
+          <th>PV Name</th>
+          <th class="num">Raw</th>
+          <th class="num">Value</th>
+          <th>Unit</th>
+          <th>Status</th>
+          <th>Updated</th>
+          <th></th>
+        </tr>
+      </thead>
+      <!-- HTMX replaces the rows every 2 s with /partials/pv-rows -->
+      <tbody hx-get="/partials/pv-rows" hx-trigger="load, every 2s" hx-swap="innerHTML">
+        <tr><td colspan="9" class="muted">Loading…</td></tr>
+      </tbody>
+    </table>
+  </main>
+
+  <!-- PV detail modal. "More" loads /pv/{id} into #pv-detail, then opens it. -->
+  <dialog id="pv-modal">
+    <div class="modal-head">
+      <strong>PV Detail</strong>
+      <button type="button" onclick="document.getElementById('pv-modal').close()" aria-label="Close">✕</button>
+    </div>
+    <div id="pv-detail"></div>
+  </dialog>
+
+</body>
+</html>
