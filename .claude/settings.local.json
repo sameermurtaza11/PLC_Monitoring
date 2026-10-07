@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "PowerShell(cd D:\\\\plc_simulator; .\\\\plc_service.ps1 status; try{\\(Invoke-WebRequest http://localhost:8080 -UseBasicParsing\\).StatusCode}catch{\"app down\"})"
-    ]
-  }
-}
