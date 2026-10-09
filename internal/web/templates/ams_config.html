@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Alarm Config · PLC Monitoring</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  {{template "nav" .}}
+
+  <main>
+    <div class="section-head">
+      <h2>Alarm configuration</h2>
+      {{if .User.Can "alarm.config"}}<a class="btn primary" href="/ams/config/new">+ New alarm</a>{{end}}
+    </div>
+    <p class="muted">Each alarm is one PV + one condition. A change is saved as a new version and takes effect
+      only after it is approved; the history of versions is kept.
+      {{if .PendingCount}}<strong>{{.PendingCount}} waiting for approval.</strong>{{end}}</p>
+    {{if .Msg}}<p class="notice" role="status">{{.Msg}}</p>{{end}}
+
+    <table class="pv-table">
+      <thead>
+        <tr>
+          <th>PLC</th><th>PV</th><th>Alarm tag</th><th>Condition</th><th>Trigger</th>
+          <th class="num">Deadband</th><th>Priority</th><th>Class</th><th>Version</th><th>Status</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {{range .Alarms}}
+        <tr>
+          <td>{{.PLCName}}</td>
+          <td>{{.PVName}}</td>
+          <td>{{.Tag}}</td>
+          <td><span class="cond">{{.Condition}}</span></td>
+          <td>{{.Trigger}}</td>
+          <td class="num">{{if .Digital}}—{{else}}{{.Deadband}}{{end}}</td>
+          <td><span class="prio prio-{{.PriorityRank}}">{{.Priority}}</span></td>
+          <td>{{.Class}}</td>
+          <td>v{{.ShownVersion}}</td>
+          <td>
+            {{if .PendingVersion}}<span class="badge warn">v{{.PendingVersion}} pending</span>
+            {{else if not .CurrentVersion}}<span class="badge bad">not approved</span>
+            {{else if not .Enabled}}<span class="badge none">disabled</span>
+            {{else}}<span class="badge ok">in force</span>{{end}}
+          </td>
+          <td><a class="btn" href="/ams/config/{{.AlarmID}}">Open</a></td>
+        </tr>
+      {{else}}
+        <tr><td colspan="11" class="muted">No alarms defined yet.</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>

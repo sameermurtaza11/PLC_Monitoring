@@ -16,6 +16,7 @@ type Config struct {
 	HTTPAddr       string        // HTTP_ADDR
 	ConfigReload   time.Duration // CONFIG_RELOAD — how often acquisition re-reads plc/pv metadata
 	AcquireEnabled bool          // ACQUISITION — "off" runs the web UI only
+	AMSEngine      bool          // AMS_ENGINE — "off" disables alarm evaluation
 }
 
 func Load() Config {
@@ -28,6 +29,7 @@ func Load() Config {
 		HTTPAddr:       env("HTTP_ADDR", ":8080"),
 		ConfigReload:   envDuration("CONFIG_RELOAD", 10*time.Second),
 		AcquireEnabled: env("ACQUISITION", "on") != "off",
+		AMSEngine:      env("AMS_ENGINE", "on") != "off",
 	}
 }
 

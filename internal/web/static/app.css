@@ -110,3 +110,34 @@ button.danger:hover { background: #fdf2f2; }
 .analog-only[hidden], .digital-only[hidden] { display: none !important; }
 .cfg-form fieldset { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px 12px; margin: 0; }
 .cfg-form legend { padding: 0 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
+
+/* Account / login (AMS step 1) */
+header nav.account-nav { margin-left: auto; }
+.account-box { max-width: 380px; }
+.account-form { display: grid; gap: 10px; }
+.account-form label { display: grid; gap: 4px; }
+.account-form input { padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 4px; }
+
+/* Alarm configuration (AMS step 2) */
+a.btn { display: inline-block; padding: 4px 12px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; color: var(--text); text-decoration: none; }
+a.btn:hover { background: #f1f5f9; }
+a.btn.primary { background: #2a78d6; border-color: #2a78d6; color: #fff; }
+.cond { display: inline-block; padding: 0 6px; border-radius: 3px; font-size: 12px; font-weight: 700; background: #e0e7ff; color: #3730a3; }
+.prio { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; color: #fff; background: #6b7280; }
+.prio-1 { background: #2563eb; }
+.prio-2 { background: var(--warn); }
+.prio-3 { background: var(--bad); }
+.notice { padding: 8px 12px; border-radius: 4px; background: #ecfdf3; color: var(--ok); }
+.ams-page { max-width: 1100px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 16px 14px; margin: 16px 0; }
+.panel h3 { margin: 8px 0; font-size: 15px; }
+ul.plain { margin: 6px 0; padding-left: 18px; }
+.cfg-form textarea { padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font: inherit; color: var(--text); resize: vertical; }
+.cfg-form .checks { display: flex; gap: 20px; flex-wrap: wrap; }
+.ams-page .form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+/* Access page (authentication per page, authorization per role) */
+.matrix th.center, .matrix td.center { text-align: center; }
+.switch { display: inline-flex; gap: 8px; align-items: center; cursor: pointer; }
+.switch span { font-variant-numeric: tabular-nums; color: var(--muted); }
+.matrix input[type=checkbox], .switch input[type=checkbox] { width: 16px; height: 16px; }
+.matrix input[disabled] { opacity: .6; }

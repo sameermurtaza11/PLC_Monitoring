@@ -2,6 +2,7 @@
 package web
 
 import (
+	"context"
 	"embed"
 	"errors"
 	"fmt"
@@ -16,6 +17,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 
+	"PLC_Monitoring/internal/access"
+	"PLC_Monitoring/internal/ams"
+	"PLC_Monitoring/internal/auth"
 	"PLC_Monitoring/internal/store"
 )
 
@@ -27,14 +31,28 @@ var staticFS embed.FS
 
 type Server struct {
 	store          *store.Store
-	onConfigChange func() // tells acquisition to reload PLC/PV config now
+	auth           *auth.Service
+	ams            *ams.ConfigService
+	ack            *ams.AckService
+	guard          *access.Guard     // who may open which page / use which feature
+	pages          *access.PageCache // the per-page "login required" switches
+	onConfigChange func()            // tells acquisition to reload PLC/PV config now
 }
 
 func NewRouter(s *store.Store, onConfigChange func()) *gin.Engine {
-	srv := &Server{store: s, onConfigChange: onConfigChange}
+	srv := &Server{store: s, auth: auth.NewService(s), ams: ams.NewConfigService(s), ack: ams.NewAckService(s), onConfigChange: onConfigChange}
+
+	srv.pages = access.NewPageCache(func() (map[string]bool, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		return s.LoadPageFlags(ctx)
+	}, 5*time.Second)
+	srv.guard = access.NewGuard(srv.pages, srv.denied)
 
 	r := gin.New()
-	r.Use(gin.Recovery(), requestLogger())
+	// auth.Load identifies the user; the guard then applies the access rules to
+	// EVERY route (a route without a rule is closed to non-administrators).
+	r.Use(gin.Recovery(), requestLogger(), auth.Load(srv.auth), srv.guard.Middleware())
 
 	tmpl := template.Must(template.New("").Funcs(funcs).ParseFS(templateFS, "templates/*.html"))
 	r.SetHTMLTemplate(tmpl)
@@ -52,15 +70,27 @@ func NewRouter(s *store.Store, onConfigChange func()) *gin.Engine {
 	r.GET("/config/plcs", srv.plcList)
 	r.GET("/config/plcs/new", srv.plcForm)
 	r.GET("/config/plcs/:id/edit", srv.plcForm)
-	r.POST("/config/plcs", srv.plcSave)
-	r.POST("/config/plcs/:id", srv.plcSave)
-	r.DELETE("/config/plcs/:id", srv.plcDelete)
+	csrf := auth.RequireCSRF() // forms send the token in the X-CSRF-Token header (see config.html)
+	r.POST("/config/plcs", csrf, srv.plcSave)
+	r.POST("/config/plcs/:id", csrf, srv.plcSave)
+	r.DELETE("/config/plcs/:id", csrf, srv.plcDelete)
 	r.GET("/config/pvs", srv.pvList)
 	r.GET("/config/pvs/new", srv.pvForm)
 	r.GET("/config/pvs/:id/edit", srv.pvForm)
-	r.POST("/config/pvs", srv.pvSave)
-	r.POST("/config/pvs/:id", srv.pvSave)
-	r.DELETE("/config/pvs/:id", srv.pvDelete)
+	r.POST("/config/pvs", csrf, srv.pvSave)
+	r.POST("/config/pvs/:id", csrf, srv.pvSave)
+	r.DELETE("/config/pvs/:id", csrf, srv.pvDelete)
+
+	// Accounts (AMS step 1)
+	r.GET("/login", srv.accountPage)
+	r.POST("/login", srv.login)
+	r.POST("/logout", srv.logout)
+	// Alarm configuration (AMS step 2) — login and permissions required
+	srv.registerAMSConfig(r)
+	// Operator API: alarm states and acknowledgement (AMS step 4)
+	srv.registerAMSAlarms(r)
+	// Access settings: which pages need a login, what each role may do
+	srv.registerAccessAdmin(r)
 
 	r.GET("/favicon.ico", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 	r.GET("/healthz", func(c *gin.Context) { c.String(http.StatusOK, "ok") })
@@ -73,7 +103,7 @@ func NewRouter(s *store.Store, onConfigChange func()) *gin.Engine {
 // ---------------------------------------------------------------------
 
 func (s *Server) dashboard(c *gin.Context) {
-	c.HTML(http.StatusOK, "dashboard.html", gin.H{"Page": "dashboard"})
+	c.HTML(http.StatusOK, "dashboard.html", s.pageData(c, "dashboard", nil))
 }
 
 // pvRows is polled by HTMX every 2 s and returns only <tr> rows.

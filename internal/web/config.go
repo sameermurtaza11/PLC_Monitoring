@@ -46,7 +46,7 @@ func (s *Server) configPage(c *gin.Context) {
 	if err != nil {
 		log.Printf("web: list plcs: %v", err)
 	}
-	c.HTML(http.StatusOK, "config.html", gin.H{"Page": "config", "PLCs": plcs})
+	c.HTML(http.StatusOK, "config.html", s.pageData(c, "config", gin.H{"PLCs": plcs}))
 }
 
 // saved closes the dialog, refreshes the lists and reloads acquisition.
@@ -269,6 +269,8 @@ func (s *Server) pvDelete(c *gin.Context) {
 
 	err := s.store.DeletePV(c.Request.Context(), id, withHistory)
 	switch {
+	case errors.Is(err, store.ErrHasAlarms):
+		s.message(c, "error", "This PV has alarm definitions, which are kept for alarm history. Disable the PV instead of deleting it.")
 	case errors.Is(err, store.ErrInUse):
 		n, _ := s.store.HistoryCount(c.Request.Context(), id)
 		c.HTML(http.StatusOK, "pv_delete_blocked.html", gin.H{"ID": id, "Count": n})

@@ -8,7 +8,7 @@
   <script src="/static/htmx.min.js"></script>
   <script src="/static/config.js" defer></script>
 </head>
-<body>
+<body hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
   {{template "nav" .}}
 
   <main>

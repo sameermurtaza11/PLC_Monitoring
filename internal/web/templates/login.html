@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Account · PLC Monitoring</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  {{template "nav" .}}
+
+  <main>
+    <section class="account-box">
+      {{if .User}}
+        <h2>{{if .User.DisplayName}}{{.User.DisplayName}}{{else}}{{.User.Username}}{{end}}</h2>
+        <p class="muted">Signed in as <strong>{{.User.Username}}</strong> · role <strong>{{.User.Role}}</strong></p>
+        <p class="muted small">Permissions: {{range $i, $p := .User.Permissions}}{{if $i}}, {{end}}<code>{{$p}}</code>{{end}}</p>
+        <form method="post" action="/logout">
+          <button type="submit">Log out</button>
+        </form>
+      {{else}}
+        <h2>Log in</h2>
+        {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+        <form method="post" action="/login" class="account-form">
+          <input type="hidden" name="next" value="{{.Next}}">
+          <label>Username <input name="username" autocomplete="username" required autofocus></label>
+          <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+          <button type="submit" class="primary">Log in</button>
+        </form>
+      {{end}}
+    </section>
+  </main>
+</body>
+</html>
