@@ -208,6 +208,10 @@ func (s *Store) HistoryCount(ctx context.Context, pvID int) (int, error) {
 // DeletePV removes a PV. If it has history, ErrInUse is returned unless
 // withHistory is true — then history and PV are deleted in one transaction.
 func (s *Store) DeletePV(ctx context.Context, id int, withHistory bool) error {
+	// A PV with alarm definitions is never deleted: the alarm history refers to it.
+	if n, err := s.AlarmCountForPV(ctx, id); err == nil && n > 0 {
+		return ErrHasAlarms
+	}
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if withHistory {
 			if _, err := tx.Exec(ctx, `DELETE FROM pv_history WHERE pv_id = $1`, id); err != nil {

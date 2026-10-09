@@ -1,3 +1,5 @@
 .env
 *.exe
 .claude/settings.local.json
+
+ams_test_users.txt

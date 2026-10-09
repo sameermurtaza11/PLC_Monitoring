@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Access · PLC Monitoring</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  {{template "nav" .}}
+
+  <main class="ams-page">
+    <h2>Access</h2>
+    <p class="muted">Two separate switches. <strong>Authentication</strong> decides per page whether it needs a login
+      (switched off, the page opens for anyone). <strong>Authorization</strong> decides per feature which role may use it
+      (ticked = allowed). Actions that change data always need a login.</p>
+    {{if .Msg}}<p class="notice" role="status">{{.Msg}}</p>{{end}}
+
+    <form method="post" action="/admin/access" class="access-form">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+
+      <section class="panel">
+        <h3>1. Authentication — which pages need a login?</h3>
+        <table class="pv-table">
+          <thead><tr><th>Page</th><th>What it is</th><th>Login required</th></tr></thead>
+          <tbody>
+          {{range .Pages}}
+            <tr>
+              <td><strong>{{.Label}}</strong></td>
+              <td class="muted">{{.Description}}</td>
+              <td><label class="switch"><input type="checkbox" name="login" value="{{.Key}}" {{if .RequiresLogin}}checked{{end}}>
+                <span>{{if .RequiresLogin}}true{{else}}false{{end}}</span></label></td>
+            </tr>
+          {{end}}
+          </tbody>
+        </table>
+        <p class="hint">Login and this Access page are always protected. If a page is switched off, anyone who can reach the server can view it.</p>
+      </section>
+
+      <section class="panel">
+        <h3>2. Authorization — which role may use which feature?</h3>
+        <table class="pv-table matrix">
+          <thead>
+            <tr><th>Feature</th>{{range .Roles}}<th class="center">{{.Name}}</th>{{end}}</tr>
+          </thead>
+          <tbody>
+          {{range .Rows}}
+            {{$key := .Key}}
+            <tr>
+              <td>{{.Description}} <span class="tag">{{.Key}}</span></td>
+              {{range .Cells}}
+              <td class="center">
+                <input type="checkbox" name="allow" value="{{.Role}}|{{$key}}"
+                       title="{{.Role}} · {{$key}}{{if .Locked}} (fixed: administrators always keep this){{end}}"
+                       {{if .Allowed}}checked{{end}} {{if .Locked}}disabled{{end}}>
+              </td>
+              {{end}}
+            </tr>
+          {{end}}
+          </tbody>
+        </table>
+      </section>
+
+      <div class="form-actions"><button type="submit" class="primary">Save</button></div>
+    </form>
+  </main>
+</body>
+</html>

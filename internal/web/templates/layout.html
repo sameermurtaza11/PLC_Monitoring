@@ -2,8 +2,11 @@
 <header>
   <h1>PLC Monitoring</h1>
   <nav>
-    <a href="/" {{if eq .Page "dashboard"}}class="active"{{end}}>Dashboard</a>
-    <a href="/config" {{if eq .Page "config"}}class="active"{{end}}>Configuration</a>
+    {{$page := .Page}}
+    {{range .Nav}}<a href="{{.Href}}" {{if eq .Key $page}}class="active"{{end}}>{{.Label}}</a>{{end}}
+  </nav>
+  <nav class="account-nav">
+    <a href="/login" {{if eq .Page "login"}}class="active"{{end}}>{{if .User}}{{.User.Username}}{{else}}Log in{{end}}</a>
   </nav>
 </header>
 {{end}}

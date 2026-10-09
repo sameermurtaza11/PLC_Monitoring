@@ -1,0 +1,191 @@
+{{define "alarm_fields"}}
+  <div class="grid2">
+    <label>Alarm tag *<input name="alarm_tag" value="{{index .F "alarm_tag"}}" maxlength="60" required>
+      {{with index .Errors "alarm_tag"}}<div class="field-error">{{.}}</div>{{end}}</label>
+    <label>Physical location<input name="location" value="{{index .F "location"}}" maxlength="120">
+      {{with index .Errors "location"}}<div class="field-error">{{.}}</div>{{end}}</label>
+
+    <label>Limit (analog alarms)<input name="setpoint" value="{{index .F "setpoint"}}" inputmode="decimal">
+      <span class="hint">HIHI/HI trigger at or above, LO/LOLO at or below. Must lie inside the PV range.</span>
+      {{with index .Errors "setpoint"}}<div class="field-error">{{.}}</div>{{end}}</label>
+    <label>Alarm state (DISCRETE alarms)
+      <select name="trigger_state">
+        <option value="">—</option>
+        <option value="0" {{if eq (index .F "trigger_state") "0"}}selected{{end}}>0 (OFF state)</option>
+        <option value="1" {{if eq (index .F "trigger_state") "1"}}selected{{end}}>1 (ON state)</option>
+      </select>
+      {{with index .Errors "trigger_state"}}<div class="field-error">{{.}}</div>{{end}}</label>
+
+    <label>Deadband / hysteresis<input name="deadband" value="{{index .F "deadband"}}" inputmode="decimal">
+      <span class="hint">Alarm returns to normal only after the value moves this far back inside the limit.</span>
+      {{with index .Errors "deadband"}}<div class="field-error">{{.}}</div>{{end}}</label>
+    <label>On-delay (s)<input name="on_delay_s" value="{{index .F "on_delay_s"}}" inputmode="numeric">
+      <span class="hint">Condition must hold this long before the alarm activates.</span>
+      {{with index .Errors "on_delay_s"}}<div class="field-error">{{.}}</div>{{end}}</label>
+    <label>Off-delay (s)<input name="off_delay_s" value="{{index .F "off_delay_s"}}" inputmode="numeric">
+      <span class="hint">Normal must hold this long before the alarm returns to normal.</span>
+      {{with index .Errors "off_delay_s"}}<div class="field-error">{{.}}</div>{{end}}</label>
+    <label>Required response time (s)<input name="response_time_s" value="{{index .F "response_time_s"}}" inputmode="numeric">
+      {{with index .Errors "response_time_s"}}<div class="field-error">{{.}}</div>{{end}}</label>
+
+    <label>Priority *
+      <select name="priority_id" required>
+        <option value="">— select —</option>
+        {{$p := index .F "priority_id"}}
+        {{range .Priorities}}<option value="{{.ID}}" {{if eq (printf "%d" .ID) $p}}selected{{end}}>{{.Name}}</option>{{end}}
+      </select>
+      {{with index .Errors "priority_id"}}<div class="field-error">{{.}}</div>{{end}}</label>
+    <label>Class *
+      <select name="class_id" required>
+        <option value="">— select —</option>
+        {{$c := index .F "class_id"}}
+        {{range .Classes}}<option value="{{.ID}}" {{if eq (printf "%d" .ID) $c}}selected{{end}}>{{.Name}}</option>{{end}}
+      </select>
+      {{with index .Errors "class_id"}}<div class="field-error">{{.}}</div>{{end}}</label>
+  </div>
+
+  <label>Alarm message *<input name="message" value="{{index .F "message"}}" maxlength="120" required>
+    {{with index .Errors "message"}}<div class="field-error">{{.}}</div>{{end}}</label>
+  <label>Description<textarea name="description" rows="2">{{index .F "description"}}</textarea></label>
+  <label>Cause<textarea name="cause" rows="2">{{index .F "cause"}}</textarea></label>
+  <label>Potential consequence<textarea name="consequence" rows="2">{{index .F "consequence"}}</textarea></label>
+  <label>Recommended operator action<textarea name="operator_action" rows="2">{{index .F "operator_action"}}</textarea></label>
+  <label>Alarm owner<input name="owner" value="{{index .F "owner"}}" maxlength="120"></label>
+
+  <div class="checks">
+    <label class="check"><input type="checkbox" name="enabled" value="1" {{if index .F "enabled"}}checked{{end}}> Enabled</label>
+    <label class="check"><input type="checkbox" name="shelving_allowed" value="1" {{if index .F "shelving_allowed"}}checked{{end}}> Shelving allowed</label>
+    <label class="check"><input type="checkbox" name="suppression_allowed" value="1" {{if index .F "suppression_allowed"}}checked{{end}}> Suppression allowed</label>
+  </div>
+
+  <label>Reason for this change *<input name="change_reason" value="{{index .F "change_reason"}}" maxlength="1000" required>
+    {{with index .Errors "change_reason"}}<div class="field-error">{{.}}</div>{{end}}</label>
+{{end}}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{if .New}}New alarm{{else}}{{.Alarm.Tag}}{{end}} · Alarm Config</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  {{template "nav" .}}
+
+  <main class="ams-page">
+    <p><a href="/ams/config">← All alarms</a></p>
+    {{if .Msg}}<p class="notice" role="status">{{.Msg}}</p>{{end}}
+    {{with index .Errors "form"}}<p class="msg error" role="alert">{{.}}</p>{{end}}
+
+{{if .New}}
+    <h2>New alarm</h2>
+    <p class="muted">The alarm is saved as version 1 and becomes active only after it is approved.</p>
+    <form method="post" action="/ams/config" class="cfg-form">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <div class="grid2">
+        <label>Process variable *
+          <select name="pv_id" required>
+            <option value="">— select —</option>
+            {{$sel := index .F "pv_id"}}
+            {{range .PVs}}<option value="{{.ID}}" {{if eq (printf "%d" .ID) $sel}}selected{{end}}>{{.PLCName}} / {{.Name}}{{if .Unit}} ({{.Unit}}){{end}}{{if .Digital}} · digital{{end}}</option>{{end}}
+          </select>
+          {{with index .Errors "pv_id"}}<div class="field-error">{{.}}</div>{{end}}</label>
+        <label>Condition *
+          <select name="condition" required>
+            <option value="">— select —</option>
+            {{$cond := index .F "condition"}}
+            {{range .Conditions}}<option value="{{.}}" {{if eq . $cond}}selected{{end}}>{{.}}</option>{{end}}
+          </select>
+          <span class="hint">Analog PVs: HIHI, HI, LO, LOLO. Digital inputs: DISCRETE.</span>
+          {{with index .Errors "condition"}}<div class="field-error">{{.}}</div>{{end}}</label>
+      </div>
+      {{template "alarm_fields" .}}
+      <div class="form-actions"><button type="submit" class="primary">Save for approval</button></div>
+    </form>
+
+{{else}}
+    <h2>{{.Alarm.Tag}} <span class="cond">{{.Alarm.Condition}}</span> <span class="prio prio-{{.Alarm.PriorityRank}}">{{.Alarm.Priority}}</span></h2>
+    <p class="muted">{{.Alarm.PLCName}} / {{.Alarm.PVName}}{{if .Alarm.Equipment}} · {{.Alarm.Equipment}}{{end}}{{if .Alarm.System}} · {{.Alarm.System}}{{end}}
+      · trigger <strong>{{.Alarm.Trigger}}</strong> · class {{.Alarm.Class}}
+      · {{if .Alarm.CurrentVersion}}version in force: v{{.Alarm.CurrentVersion}}{{else}}no version approved yet{{end}}</p>
+
+    {{if .Pending}}
+    <section class="panel">
+      <h3>Version {{.Pending.Version}} is waiting for approval</h3>
+      <p class="muted">Submitted by <strong>{{.Pending.CreatedBy}}</strong> on {{ts .Pending.CreatedAt}} —
+        “{{.Pending.ChangeReason}}”. The approved version stays in force until this is approved.</p>
+      <ul class="plain">
+        <li>Trigger: {{if .Pending.TriggerState}}{{if eq (deref2 .Pending.TriggerState) 1}}state 1 (ON){{else}}state 0 (OFF){{end}}{{else}}{{num .Pending.Setpoint}} {{.Alarm.Unit}}{{end}}</li>
+        <li>Deadband {{.Pending.Deadband}} · on-delay {{.Pending.OnDelayS}} s · off-delay {{.Pending.OffDelayS}} s</li>
+        <li>Priority {{.Pending.PriorityName}} · class {{.Pending.ClassName}} · {{if .Pending.Enabled}}enabled{{else}}disabled{{end}}</li>
+        <li>Message: {{.Pending.Message}}</li>
+      </ul>
+      {{with index .Errors "review"}}<p class="msg error" role="alert">{{.}}</p>{{end}}
+      {{if .CanApprove}}
+      <form method="post" action="/ams/config/{{.Alarm.AlarmID}}/review" class="cfg-form">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <input type="hidden" name="version" value="{{.Pending.Version}}">
+        <label>Comment (required when rejecting)<input name="comment" maxlength="1000">
+          {{with index .Errors "comment"}}<div class="field-error">{{.}}</div>{{end}}</label>
+        <div class="form-actions">
+          <button type="submit" name="decision" value="reject" class="danger">Reject</button>
+          <button type="submit" name="decision" value="approve" class="primary">Approve</button>
+        </div>
+      </form>
+      {{else}}<p class="muted">Someone with approval rights must review this version.</p>{{end}}
+    </section>
+    {{end}}
+
+    {{if .Shown}}
+    <section class="panel">
+      <h3>Settings shown: version {{.Shown.Version}} ({{.Shown.Status}})</h3>
+      <dl class="meta">
+        <dt>Message</dt><dd>{{.Shown.Message}}</dd>
+        <dt>Description</dt><dd>{{orDash .Shown.Description}}</dd>
+        <dt>Cause</dt><dd>{{orDash .Shown.Cause}}</dd>
+        <dt>Consequence</dt><dd>{{orDash .Shown.Consequence}}</dd>
+        <dt>Operator action</dt><dd>{{orDash .Shown.OperatorAction}}</dd>
+        <dt>Owner</dt><dd>{{orDash .Shown.Owner}}</dd>
+        <dt>Location</dt><dd>{{orDash .Shown.Location}}</dd>
+        <dt>Deadband · delays</dt><dd>{{.Shown.Deadband}} · on {{.Shown.OnDelayS}} s · off {{.Shown.OffDelayS}} s</dd>
+        <dt>Shelving · suppression</dt><dd>{{if .Shown.ShelvingAllowed}}allowed{{else}}not allowed{{end}} · {{if .Shown.SuppressionAllowed}}allowed{{else}}not allowed{{end}}</dd>
+      </dl>
+    </section>
+    {{end}}
+
+    {{if and .CanEdit (not .Pending)}}
+    <section class="panel">
+      <h3>Change this alarm</h3>
+      <p class="muted">Saved as a new version; it takes effect only after it is approved.</p>
+      <form method="post" action="/ams/config/{{.Alarm.AlarmID}}" class="cfg-form">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        {{template "alarm_fields" .}}
+        <div class="form-actions"><button type="submit" class="primary">Save new version for approval</button></div>
+      </form>
+    </section>
+    {{end}}
+
+    <section class="panel">
+      <h3>Version history</h3>
+      <table class="pv-table">
+        <thead><tr><th>Version</th><th>Status</th><th>Limit</th><th>Priority</th><th>Submitted</th><th>Reason</th><th>Reviewed</th></tr></thead>
+        <tbody>
+        {{range .Versions}}
+          <tr>
+            <td>v{{.Version}}</td>
+            <td><span class="badge {{if eq .Status "approved"}}ok{{else if eq .Status "pending"}}warn{{else if eq .Status "rejected"}}bad{{else}}none{{end}}">{{.Status}}</span></td>
+            <td>{{if .TriggerState}}state {{deref2 .TriggerState}}{{else}}{{num .Setpoint}}{{end}}</td>
+            <td>{{.PriorityName}}</td>
+            <td>{{if .CreatedBy}}{{.CreatedBy}}{{else}}<span class="muted">system import</span>{{end}} · {{ts .CreatedAt}}</td>
+            <td>{{.ChangeReason}}</td>
+            <td>{{if .ReviewedBy}}{{.ReviewedBy}} · {{time .ReviewedAt}}{{if .ReviewComment}} — {{.ReviewComment}}{{end}}{{else}}<span class="muted">—</span>{{end}}</td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+    </section>
+{{end}}
+  </main>
+</body>
+</html>

@@ -19,6 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"PLC_Monitoring/internal/acquisition"
+	"PLC_Monitoring/internal/ams"
 	"PLC_Monitoring/internal/config"
 	"PLC_Monitoring/internal/store"
 	"PLC_Monitoring/internal/web"
@@ -55,6 +56,21 @@ func main() {
 		log.Println("acquisition disabled (ACQUISITION=off)")
 	}
 
+	// Alarm engine: evaluates the approved alarm definitions against the latest
+	// PV values, independent of any browser. Only one instance per database
+	// evaluates (advisory lock), so a second copy of the app is harmless.
+	engDone := make(chan struct{})
+	if cfg.AMSEngine {
+		engine := ams.NewEngine(db, ams.EngineOptions{})
+		go func() {
+			defer close(engDone)
+			engine.Run(ctx)
+		}()
+	} else {
+		close(engDone)
+		log.Println("alarm engine disabled (AMS_ENGINE=off)")
+	}
+
 	gin.SetMode(gin.ReleaseMode)
 	httpSrv := &http.Server{Addr: cfg.HTTPAddr, Handler: web.NewRouter(db, onConfigChange)}
 	go func() {
@@ -70,4 +86,5 @@ func main() {
 	defer cancel()
 	httpSrv.Shutdown(shutdownCtx)
 	<-acqDone
+	<-engDone
 }

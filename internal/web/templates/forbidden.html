@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Not permitted · PLC Monitoring</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  {{template "nav" .}}
+
+  <main>
+    <section class="account-box">
+      <h2>Not permitted</h2>
+      <p>Your role{{if .User}} (<strong>{{.User.Role}}</strong>){{end}} may not use <strong>{{.Label}}</strong>.</p>
+      <p class="muted small">Required feature: <code>{{.Permission}}</code>. An administrator can change this on the Access page.</p>
+      <p><a href="/">Back to the dashboard</a></p>
+    </section>
+  </main>
+</body>
+</html>
